@@ -1,0 +1,140 @@
+"""
+animate_bed_fold.FCMacro
+========================
+Animates the passenger-side fold-out bed (single -> double):
+
+  Phase 1 — Body005 (PS-Small-Flap) rotates anti-clockwise 180 deg then returns.
+  Phase 2 — Body006 (PS-Large-Flap) rotates anti-clockwise 180 deg then returns.
+
+Both bodies start and end at their current (zero-rotation) positions in the model.
+Hinge for both: X=-580, parallel to Y axis.
+
+  Body005: free end is LEFT  of hinge (X=-1140). Anti-clockwise = -180 deg in FreeCAD.
+           Hinge Z=415 (top face of Body005).
+  Body006: free end is RIGHT of hinge (X=-20).   Anti-clockwise = -180 deg in FreeCAD.
+           Hinge Z=415 (bottom face of Body006).
+
+Both swing downward through vertical at 90 deg then land flat on the other side.
+
+How to run in FreeCAD Python console:
+    exec(open('/Users/martin/Desktop/van-08-07-26/animate_bed_fold.FCMacro').read())
+
+After running, call animate_back() to return both panels clockwise to start.
+Or call animate_loop(cycles=3) to repeat.
+"""
+
+import FreeCAD
+import FreeCADGui
+import time
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+STEPS       = 36      # frames per panel (36 = 5 deg per step)
+DELAY       = 0.02    # seconds between frames
+TOTAL_ANGLE = 180.0   # degrees of travel
+HINGE_AXIS  = FreeCAD.Vector(0.0, 1.0, 0.0)
+# ───────────────────────────────────────────────────────────────────────────────
+
+try:
+    from PySide2.QtWidgets import QApplication
+except ImportError:
+    from PySide6.QtWidgets import QApplication
+
+def _refresh():
+    FreeCADGui.updateGui()
+    QApplication.processEvents()
+
+# ── Document & bodies ──────────────────────────────────────────────────────────
+doc = FreeCAD.ActiveDocument
+if doc is None:
+    raise RuntimeError("No active FreeCAD document found.")
+
+body005 = doc.getObject("Body005")
+body006 = doc.getObject("Body006")
+if body005 is None: raise RuntimeError("Body005 (PS-Small-Flap) not found.")
+if body006 is None: raise RuntimeError("Body006 (PS-Large-Flap) not found.")
+
+# ── Start placements (captured once at load time) ──────────────────────────────
+_start_005 = FreeCAD.Placement(body005.Placement)   # base=(-1140, 2141, 400), rot=0
+_start_006 = FreeCAD.Placement(body006.Placement)   # base=(-580,   781, 415), rot=0
+
+# Hinge points (X=-580, Z = bottom face of each body)
+_hinge_005 = FreeCAD.Vector(-580.0, 0.0, 415.0)
+_hinge_006 = FreeCAD.Vector(-580.0, 0.0, 415.0)
+
+# Both rotate anti-clockwise with negative angle
+_dir_005 = -1.0
+_dir_006 = -1.0
+
+
+def _placement_at_angle(start, hinge, direction, angle_deg):
+    """Placement for a body rotated `angle_deg` from its start, in `direction`."""
+    rot      = FreeCAD.Rotation(HINGE_AXIS, direction * angle_deg)
+    new_base = rot.multVec(start.Base - hinge) + hinge
+    new_rot  = rot.multiply(start.Rotation)
+    return FreeCAD.Placement(new_base, new_rot)
+
+
+def _animate_body(body, start, hinge, direction, from_angle, to_angle, steps, delay, label):
+    """Animate a single body from from_angle to to_angle."""
+    print(f"  {label} ...")
+    try:
+        for step in range(steps + 1):
+            t     = step / steps
+            angle = from_angle + t * (to_angle - from_angle)
+            body.Placement = _placement_at_angle(start, hinge, direction, angle)
+            doc.recompute()
+            _refresh()
+            time.sleep(delay)
+    except KeyboardInterrupt:
+        print("  Interrupted.")
+        raise
+
+
+def animate_out(steps=STEPS, delay=DELAY):
+    """
+    Phase 1: Body005 rotates anti-clockwise 180 deg (0 -> 180).
+    Phase 2: Body006 rotates anti-clockwise 180 deg (0 -> 180).
+    Body005 completes fully before Body006 begins.
+    """
+    try:
+        _animate_body(body005, _start_005, _hinge_005, _dir_005,
+                      0, TOTAL_ANGLE, steps, delay,
+                      "Body005 (PS-Small-Flap) folding out [anti-clockwise]")
+        _animate_body(body006, _start_006, _hinge_006, _dir_006,
+                      0, TOTAL_ANGLE, steps, delay,
+                      "Body006 (PS-Large-Flap) folding out [anti-clockwise]")
+    except KeyboardInterrupt:
+        return
+    print("Done. Bed fully extended.")
+    print("Call animate_back() to return both panels to start.")
+
+
+def animate_back(steps=STEPS, delay=DELAY):
+    """
+    Phase 1: Body006 returns clockwise 180 deg (180 -> 0).
+    Phase 2: Body005 returns clockwise 180 deg (180 -> 0).
+    """
+    try:
+        _animate_body(body006, _start_006, _hinge_006, _dir_006,
+                      TOTAL_ANGLE, 0, steps, delay,
+                      "Body006 (PS-Large-Flap) returning [clockwise]")
+        _animate_body(body005, _start_005, _hinge_005, _dir_005,
+                      TOTAL_ANGLE, 0, steps, delay,
+                      "Body005 (PS-Small-Flap) returning [clockwise]")
+    except KeyboardInterrupt:
+        return
+    print("Done. Both panels back at start position.")
+
+
+def animate_loop(cycles=1, steps=STEPS, delay=DELAY):
+    """Fold out then back, repeated `cycles` times."""
+    for i in range(cycles):
+        if cycles > 1:
+            print(f"\nCycle {i+1}/{cycles}")
+        animate_out(steps, delay)
+        time.sleep(0.5)
+        animate_back(steps, delay)
+
+
+# ── Run immediately ────────────────────────────────────────────────────────────
+animate_out()
